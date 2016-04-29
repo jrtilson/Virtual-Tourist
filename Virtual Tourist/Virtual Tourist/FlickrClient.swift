@@ -25,6 +25,8 @@ class FlickrClient: NSObject {
         /* Build the URL and configure the request */
         let urlString = url + FlickrClient.escapedParameters(parameters)
         
+        print(urlString)
+        
         let url = NSURL(string: urlString)!
         
         let request = FlickrClient.buildRequest(url, method: "GET", additionalHTTPHeaders: additionalHTTPHeaders)
@@ -60,6 +62,9 @@ class FlickrClient: NSObject {
 
         let url = Constants.BaseURL
         
+        // Generate a random number between 1 and 40 so we can get different set of photos
+        let randomNumber = Int(arc4random_uniform(40) + 1)
+        
         let parameters = [
             QueryStringKeys.Method: Methods.Search,
             QueryStringKeys.ApiKey: Constants.FlickrApiKey,
@@ -69,7 +74,8 @@ class FlickrClient: NSObject {
             QueryStringKeys.Latitude: latitude,
             QueryStringKeys.Longitude: longitude,
             QueryStringKeys.Extras: QueryStringValues.URLMedium,
-            QueryStringKeys.Media: QueryStringValues.MediaPhotos
+            QueryStringKeys.Media: QueryStringValues.MediaPhotos,
+            QueryStringKeys.Page: randomNumber
         ]
         
         performGET(url, parameters: parameters, additionalHTTPHeaders: [String: String]()) {data, error in
@@ -93,6 +99,8 @@ class FlickrClient: NSObject {
                             completionHandler(result: nil, error: NSError(domain: "getPhotosForLatitudeLongitude parsing", code: 0, userInfo: [NSLocalizedDescriptionKey: "Could not parse 'photo' array from getPhotosForLatitudeLongitude"]))
                             return
                         }
+                        
+                        print("Found: \(photoArray.count) photos")
                         
                         completionHandler(result: photoArray, error: nil)
                     }

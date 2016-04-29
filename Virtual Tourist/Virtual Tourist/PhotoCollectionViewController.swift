@@ -158,6 +158,9 @@ class PhotoCollectionViewController: UIViewController, NSFetchedResultsControlle
         
         if (sectionInfo.numberOfObjects > 0) {
             noPhotosLabel.hidden = true
+        } else {
+            noPhotosLabel.hidden = false
+            newCollectionButton.enabled = true
         }
         
         return sectionInfo.numberOfObjects

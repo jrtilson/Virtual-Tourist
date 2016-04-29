@@ -156,6 +156,9 @@ class MapViewController: UIViewController, MKMapViewDelegate, NSFetchedResultsCo
             
             CoreDataStackManager.sharedInstance().saveContext()
             
+            // De-select (fix for can't select the same pin again)
+            mapView.deselectAnnotation(view.annotation, animated: false)
+            
             self.navigationController!.pushViewController(controller, animated: true)
         } else {
             

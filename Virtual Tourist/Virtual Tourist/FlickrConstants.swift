@@ -29,6 +29,7 @@ extension FlickrClient {
         static let PerPage = "per_page"
         static let Extras = "extras"
         static let Media = "media"
+        static let Page = "page"
     }
     
     struct QueryStringValues {
