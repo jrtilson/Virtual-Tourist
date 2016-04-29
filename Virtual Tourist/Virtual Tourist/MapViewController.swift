@@ -15,6 +15,8 @@ class MapViewController: UIViewController, MKMapViewDelegate, NSFetchedResultsCo
     // MARK: - Outlets
     @IBOutlet weak var mapView: MKMapView!
     
+    // MARK: - Properties
+    var pinPhotosReady: Bool = false
     
     // MARK: - UIViewController
     override func viewDidLoad() {
@@ -35,21 +37,16 @@ class MapViewController: UIViewController, MKMapViewDelegate, NSFetchedResultsCo
         // Set fetchedResultsController delegate
         fetchedResultsController.delegate = self
         
-        
         self.populateMap()
     }
-    
-    // MARK: - Core Data Convenience
-    var sharedContext: NSManagedObjectContext {
-        return CoreDataStackManager.sharedInstance().managedObjectContext
-    }
+
     
     // lazy fetchedResultsController property
     lazy var fetchedResultsController: NSFetchedResultsController = {
         
         let fetchRequest = NSFetchRequest(entityName: "Pin")
         
-        fetchRequest.sortDescriptors = []
+        fetchRequest.sortDescriptors = [NSSortDescriptor(key: "latitude", ascending: true)]
         
         let fetchedResultsController = NSFetchedResultsController(fetchRequest: fetchRequest,
                                                                   managedObjectContext: self.sharedContext,
@@ -103,8 +100,10 @@ class MapViewController: UIViewController, MKMapViewDelegate, NSFetchedResultsCo
         saveMapRegion()
     }
     
-    /* Animate the annotation (actually drop the pin) */
+   
     func mapView(mapView: MKMapView, didAddAnnotationViews views: [MKAnnotationView]) {
+         /* Animate the annotation (actually drop the pin) */
+        
         // I thought this would be straightforward, boy was I wrong. 
         // Found a good solution here: http://stackoverflow.com/a/34967157/1202510
         
@@ -142,8 +141,38 @@ class MapViewController: UIViewController, MKMapViewDelegate, NSFetchedResultsCo
                 })
             })
         }
+        
+        
     }
     
+    /* Handle tapping on a map annotation - seque to the photo collection controller */
+    func mapView(mapView: MKMapView, didSelectAnnotationView view: MKAnnotationView) {
+        
+        if let pin = getManagedPinFromCoordinate((view.annotation?.coordinate)!) {
+            
+            let controller = storyboard!.instantiateViewControllerWithIdentifier("PhotoCollectionViewController") as! PhotoCollectionViewController
+            
+            controller.pin = pin
+            
+            CoreDataStackManager.sharedInstance().saveContext()
+            
+            self.navigationController!.pushViewController(controller, animated: true)
+        } else {
+            
+
+            
+            print("Counted: \(fetchedResultsController.fetchedObjects?.count) objects in fetched results")
+            print("Counted: \(mapView.annotations.count) pins on map")
+        }
+    }
+    
+    // MARK: - FetchedResultsControllerDelegate 
+    
+    func controllerDidChangeContent(controller: NSFetchedResultsController) {
+        do {
+            try fetchedResultsController.performFetch()
+        } catch {}
+    }
     
     // MARK: - Helpers
     
@@ -163,37 +192,85 @@ class MapViewController: UIViewController, MKMapViewDelegate, NSFetchedResultsCo
             ]
             
             // Create with sharedContext
-            let _ = Pin(dictionary: dictionary, context: sharedContext)
+            let addedPin = Pin(dictionary: dictionary, context: sharedContext)
             
             CoreDataStackManager.sharedInstance().saveContext()
+            
+            FlickrClient.sharedInstance().getPhotosForLatitudeLongitude(addedPin.latitude, longitude: addedPin.longitude) { (result, error) in
+                // Check for an error fetching the photos from the api
+                guard (error == nil) else {
+                    print(error)
+                    return
+                }
+                
+                // Create photo entities
+                for apiPhoto in result! {
+                    
+                    // New entity
+                    let newPhoto = Photo(
+                        id: apiPhoto[FlickrClient.JSONResponseKeys.Id]! as! String,
+                        url: apiPhoto[FlickrClient.QueryStringValues.URLMedium]! as! String,
+                        context: self.sharedContext
+                    )
+                    
+                    // Set this new pin to this photo
+                    newPhoto.pin = addedPin
+                    
+                    FlickrClient.sharedInstance().downloadImageFromUrl(newPhoto.imageUrl!) {(data, error) in
+                        guard (error == nil) else {
+                            print(error?.localizedDescription)
+                            return
+                        }
+                        
+                        if let data = data {
+                            newPhoto.imageData = data
+                            NSNotificationCenter.defaultCenter().postNotificationName("photoDownloadComplete", object: nil)
+                            
+                            dispatch_async(dispatch_get_main_queue(), {
+                                CoreDataStackManager.sharedInstance().saveContext()
+                            })
+                        }
+                    }
+                }
+            }
         }
     }
     
     /* Helper function to populate the MapView */
     func populateMap() {
-        dispatch_async(dispatch_get_main_queue()) {
-            // Set up an array of MKPointAnnotations
-            var annotations = [MKPointAnnotation]()
+        // Set up an array of MKPointAnnotations
+        var annotations = [MKPointAnnotation]()
             
-            for object in self.fetchedResultsController.fetchedObjects!  {
-                // Get the individual pin object
-                if let pin = object as? Pin {
+        for object in fetchedResultsController.fetchedObjects!  {
+            // Get the individual pin object
+            if let pin = object as? Pin {
                 
-                    let lat = CLLocationDegrees(pin.latitude)
-                    let long = CLLocationDegrees(pin.longitude)
+                let lat = CLLocationDegrees(pin.latitude)
+                let long = CLLocationDegrees(pin.longitude)
                 
-                    // Generate coordinate and annotations
-                    let coordinate = CLLocationCoordinate2D(latitude: lat, longitude: long)
-                    
-                    let annotation = MKPointAnnotation()
-                    annotation.coordinate = coordinate
-                    
-                    annotations.append(annotation)
+                // Generate coordinate and annotations
+                let coordinate = CLLocationCoordinate2D(latitude: lat, longitude: long)
+                
+                let annotation = MKPointAnnotation()
+                annotation.coordinate = coordinate
+                annotations.append(annotation)
+            }
+        }
+        // When the array is loaded, we add the annotations to the map.
+        self.mapView.addAnnotations(annotations)
+        
+    }
+    
+    /* Determine which pin from our fetchedResults matches the given coordinates */
+    func getManagedPinFromCoordinate(coordinate: CLLocationCoordinate2D) -> Pin? {
+        for object in fetchedResultsController.fetchedObjects!  {
+            if let pin = object as? Pin {
+                if (NSNumber(double: coordinate.latitude) == pin.latitude && NSNumber(double: coordinate.longitude) == pin.longitude) {
+                    return pin
                 }
             }
-            // When the array is loaded, we add the annotations to the map.
-            self.mapView.addAnnotations(annotations)
         }
+        return nil
     }
 }
 

@@ -8,10 +8,10 @@
 
 import Foundation
 
-class BaseClient: NSObject {
+class FlickrClient: NSObject {
     // MARK: - Class Properties
     var session: NSURLSession // Shared session
-    var baseURL: String!
+    var isDownloading: Bool = false
     
     // MARK: - Init
     override init() {
@@ -20,17 +20,14 @@ class BaseClient: NSObject {
     }
     
     // MARK: - GET
-    func performGET(method: String, parameters: [String : AnyObject], additionalHTTPHeaders: [String:String]?, completionHandler: (result: AnyObject!, error: NSError?) -> Void) -> NSURLSessionDataTask {
-        // Borrowed from the movie manager app
+    func performGET(url: String, parameters: [String : AnyObject], additionalHTTPHeaders: [String:String]?, completionHandler: (result: NSData!, error: NSError?) -> Void) -> NSURLSessionDataTask {
+    
+        /* Build the URL and configure the request */
+        let urlString = url + FlickrClient.escapedParameters(parameters)
         
-        /* 1. Set the parameters */
-        let mutableParameters = parameters
-        
-        /* 2/3. Build the URL and configure the request */
-        let urlString = baseURL + method + BaseClient.escapedParameters(mutableParameters)
         let url = NSURL(string: urlString)!
         
-        let request = BaseClient.buildRequest(url, method: "GET", additionalHTTPHeaders: additionalHTTPHeaders)
+        let request = FlickrClient.buildRequest(url, method: "GET", additionalHTTPHeaders: additionalHTTPHeaders)
         
         /* 4. Make the request */
         let task = session.dataTaskWithRequest(request) { (data, response, error) in
@@ -41,12 +38,12 @@ class BaseClient: NSObject {
                 return
             }
             
-            if let validationError = BaseClient.validateDataAndResponse(response, data: data) as NSError? {
+            if let validationError = FlickrClient.validateDataAndResponse(response, data: data) as NSError? {
                 completionHandler(result: nil, error: validationError)
             }
             
-            /* 5/6. Parse the data and use the data (happens in completion handler) */
-            self.dynamicType.parseJSONWithCompletionHandler(data!, completionHandler: completionHandler)
+            
+            completionHandler(result: data!, error: nil)
         }
         
         /* 7. Start the request */
@@ -55,78 +52,65 @@ class BaseClient: NSObject {
         return task
     }
     
-    // MARK: - POST
-    func performPOST(method: String, parameters: [String : AnyObject], jsonBody: [String:AnyObject], additionalHTTPHeaders: [String:String]?, completionHandler: (result: AnyObject!, error: NSError?) -> Void) -> NSURLSessionDataTask {
-        // Borrowed from the movie manager app
+    
+    // MARK: - FlickrClient Convenience
+    
+    /* Get photos locations from flickr for a given latitude/longitude */
+    func getPhotosForLatitudeLongitude(latitude: NSNumber, longitude: NSNumber, completionHandler: (result: [AnyObject]?, error: NSError?) -> Void) {
+
+        let url = Constants.BaseURL
         
-        /* 1. Set the parameters */
-        let mutableParameters = parameters
+        let parameters = [
+            QueryStringKeys.Method: Methods.Search,
+            QueryStringKeys.ApiKey: Constants.FlickrApiKey,
+            QueryStringKeys.Format: QueryStringValues.FormatJSON,
+            QueryStringKeys.RawJSON: 1,  // Force raw json results (no callback)
+            QueryStringKeys.PerPage: "24", // Nice round number for our collection view
+            QueryStringKeys.Latitude: latitude,
+            QueryStringKeys.Longitude: longitude,
+            QueryStringKeys.Extras: QueryStringValues.URLMedium,
+            QueryStringKeys.Media: QueryStringValues.MediaPhotos
+        ]
         
-        /* 2/3. Build the URL and configure the request */
-        let urlString = baseURL + method + BaseClient.escapedParameters(mutableParameters)
-        let url = NSURL(string: urlString)!
-        
-        let request = BaseClient.buildRequest(url, method: "POST", additionalHTTPHeaders: additionalHTTPHeaders)
-        
-        do {
-            request.HTTPBody = try! NSJSONSerialization.dataWithJSONObject(jsonBody, options: .PrettyPrinted)
-        }
-        
-        /* 4. Make the request */
-        let task = session.dataTaskWithRequest(request) { (data, response, error) in
-            
-            /* GUARD: Was there an error? */
-            guard (error == nil) else {
-                print("There was an error with your request: \(error)")
+        performGET(url, parameters: parameters, additionalHTTPHeaders: [String: String]()) {data, error in
+            if let error = error {
                 completionHandler(result: nil, error: error)
-                return
+            } else {
+                
+                FlickrClient.parseJSONWithCompletionHandler(data, completionHandler: { (JSONResult, error) in
+                    if let error = error {
+                        completionHandler(result: nil, error: error)
+                    } else {
+                    
+                        // We should get a dictionary of String:AnyObjects from the photos key here
+                        guard let photos = JSONResult[FlickrClient.JSONResponseKeys.Photos] as? [String : AnyObject] else {
+                            completionHandler(result: nil, error: NSError(domain: "getPhotosForLatitudeLongitude parsing", code: 0, userInfo: [NSLocalizedDescriptionKey: "Could not parse 'photos' from getPhotosForLatitudeLongitude"]))
+                            return
+                        }
+                        
+                        // The photos key will return an array of objects
+                        guard let photoArray = photos[FlickrClient.JSONResponseKeys.Photo] as? [AnyObject] else {
+                            completionHandler(result: nil, error: NSError(domain: "getPhotosForLatitudeLongitude parsing", code: 0, userInfo: [NSLocalizedDescriptionKey: "Could not parse 'photo' array from getPhotosForLatitudeLongitude"]))
+                            return
+                        }
+                        
+                        completionHandler(result: photoArray, error: nil)
+                    }
+                })
             }
-            
-            if let validationError = BaseClient.validateDataAndResponse(response, data: data) as NSError? {
-                completionHandler(result: nil, error: validationError)
-            }
-            
-            /* 5/6. Parse the data and use the data (happens in completion handler) */
-            self.dynamicType.parseJSONWithCompletionHandler(data!, completionHandler: completionHandler)
         }
-        
-        /* 7. Start the request */
-        task.resume()
-        
-        return task
     }
     
-    // MARK: - DELETE
-    func performDELETE(method: String, parameters: [String: AnyObject], additionalHTTPHeaders: [String:String]?, completionHandler: (result: AnyObject!, error: NSError?) -> Void) -> NSURLSessionDataTask {
-        /* 1. Set the parameters */
-        let mutableParameters = parameters
-        
-        /* 2/3. Build the URL and configure the request */
-        let urlString = baseURL + method + BaseClient.escapedParameters(mutableParameters)
-        let url = NSURL(string: urlString)!
-        
-        let request = BaseClient.buildRequest(url, method: "DELETE", additionalHTTPHeaders: additionalHTTPHeaders)
-        
-        /* 4. Make the request */
-        let task = session.dataTaskWithRequest(request) { data, response, error in
-            
-            /* Check for an error */
-            guard (error == nil) else {
-                print("There was an error with your request: \(error)")
-                completionHandler(result: nil, error: error)
-                return
+    func downloadImageFromUrl(imageUrl: String, completionHandler: (imageData: NSData?, error: NSError?) -> Void) {
+        // Try downloaidng the image
+        performGET(imageUrl, parameters: [String: String](), additionalHTTPHeaders: [String: String]()) {data, error in
+            if let error = error {
+                completionHandler(imageData: nil, error: error)
+            } else {
+                completionHandler(imageData: data, error: nil)
             }
-            
-            if let validationError = BaseClient.validateDataAndResponse(response, data: data) as NSError? {
-                completionHandler(result: nil, error: validationError)
-            }
-            
-            /* 5/6. Parse the data and use the data (happens in completion handler) */
-            self.dynamicType.parseJSONWithCompletionHandler(data!, completionHandler: completionHandler)
         }
-        
-        task.resume()
-        return task
+
     }
     
     // MARK: - Helper functions
@@ -201,12 +185,11 @@ class BaseClient: NSObject {
         completionHandler(result: parsedResult, error: nil)
     }
     
-    /* Helper: Substitute the key for the value that is contained within the method name */
-    class func substituteKeyInMethod(method: String, key: String, value: String) -> String? {
-        if method.rangeOfString("{\(key)}") != nil {
-            return method.stringByReplacingOccurrencesOfString("{\(key)}", withString: value)
-        } else {
-            return nil
+    // Class variable to get access to a static shared instance
+    class func sharedInstance() -> FlickrClient {
+        struct Static {
+            static let instance = FlickrClient()
         }
+        return Static.instance
     }
 }

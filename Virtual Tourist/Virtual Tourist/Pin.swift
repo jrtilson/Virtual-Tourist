@@ -37,7 +37,7 @@ class Pin: NSManagedObject {
         super.init(entity: entity, insertIntoManagedObjectContext: context)
         
         // Init the class properties
-        latitude = dictionary[Keys.Latitude] as! NSNumber
-        longitude = dictionary[Keys.Longitude] as! NSNumber
+        latitude = dictionary[Keys.Latitude] as! Double
+        longitude = dictionary[Keys.Longitude] as! Double
     }
 }
